@@ -1,0 +1,170 @@
+﻿<!DOCTYPE html>
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <title>Send Email</title>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #ffffff;
+            font-size: 14px;
+            font-family: "Segoe UI", Tahoma, Verdana, sans-serif;
+        }
+
+        #button {
+            line-height: 16px;
+            height: 22px;
+            line-height: 17px;
+            text-align: center;
+            white-space: nowrap;
+            font-size: 11px;
+            font-weight: 700;
+            outline: none;
+            color: rgb(255, 255, 255);
+            background: rgb(57, 153, 12);
+            border-color: rgb(32, 163, 15);
+            width: 140px;
+            display: inherit;
+            margin-bottom: 2px;
+        }
+
+            #button:hover {
+                background: rgb(220,220,220);
+                color: black;
+                cursor: pointer;
+            }
+    </style>
+</head>
+<body>
+    <script>
+        window.onload = function () {
+            CheckRolesForDisplayButton();
+        }
+
+        function CheckRolesForDisplayButton() {
+            var roles = window.parent.Xrm.Page.context.getUserRoles();
+
+            for (var i = 0; i < roles.length; i++) {
+                GetRoleName(roles[i]);
+            }
+        }
+
+        //Получаем название роли и отображаем кнопку если у пользователя есть роль Системный администратор или Настройщик системы
+        function GetRoleName(roleId) {
+            var req = new XMLHttpRequest();
+            req.open("GET", window.parent.Xrm.Page.context.getClientUrl() + "/api/data/v9.1/roles(" + roleId + ")?$select=name", true);
+            req.setRequestHeader("OData-MaxVersion", "4.0");
+            req.setRequestHeader("OData-Version", "4.0");
+            req.setRequestHeader("Accept", "application/json");
+            req.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+            req.setRequestHeader("Prefer", "odata.include-annotations=\"*\"");
+            req.onreadystatechange = function () {
+                if (this.readyState === 4) {
+                    req.onreadystatechange = null;
+                    if (this.status === 200) {
+                        var result = JSON.parse(this.response);
+                        var roleName = result["name"];
+                        if (roleName == "Системный администратор" || roleName == "Настройщик системы") {
+                            document.getElementById("button").style.display = "block";
+                        }
+                    } else {
+                        alert(this.statusText);
+                    }
+                }
+            };
+            req.send();
+        }
+
+        function SendEmail() {
+            if (!window.parent.Xrm.Page.getAttribute("crf24_owningteam")) return;
+
+            var owningteam = window.parent.Xrm.Page.getAttribute("crf24_owningteam").getValue();
+
+            if (!owningteam) {
+                alert("Для отправки электронного сообщения должна быть заполнена 'Ответственная рабочая группа'"); return;
+            }
+
+            window.parent.Xrm.Page.ui.clearFormNotification("1");
+            window.parent.Xrm.Page.ui.clearFormNotification("3");
+
+            GenerateRecordUrl();
+            var entityId = window.parent.Xrm.Page.data.entity.getId().replace("{", "").replace("}", "");
+
+            //Получаю ID workflow с именем "Send Email"
+            var req = new XMLHttpRequest();
+            req.open("GET", window.parent.Xrm.Page.context.getClientUrl() + "/api/data/v9.1/workflows?$select=workflowid&$filter=name eq 'Send Email' and type eq 1", true);
+            req.setRequestHeader("OData-MaxVersion", "4.0");
+            req.setRequestHeader("OData-Version", "4.0");
+            req.setRequestHeader("Accept", "application/json");
+            req.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+            req.onreadystatechange = function () {
+                if (this.readyState === 4) {
+                    req.onreadystatechange = null;
+                    if (this.status === 200) {
+                        var result = JSON.parse(this.response);
+                        var wfid = result.value[0]["workflowid"];
+                        CallWorkflow(entityId, wfid)
+                    } else {
+                        alert(this.statusText);
+                    }
+                }
+            };
+            req.send();
+        }
+
+        function GenerateRecordUrl() {
+            var orgURL = window.parent.Xrm.Page.context.getClientUrl();
+            var recordId = window.parent.Xrm.Page.data.entity.getId().replace("{", "").replace("}", "");
+            var entityName = window.parent.Xrm.Page.data.entity.getEntityName();
+
+            var objectTypeCode = 2; //for contact entity
+
+            var recordURL = orgURL + "/main.aspx?etc=" + objectTypeCode +
+                "&id=%7b" + recordId + "%7d&pagetype=entityrecord";
+
+            window.parent.Xrm.Page.getAttribute("crf24_urlentity").setValue(recordURL);
+            window.parent.Xrm.Page.data.save();
+        }
+
+        //Вызываю wokflow "Send Email"
+        function CallWorkflow(entityId, workflowId) {
+
+            var isdirty = window.parent.Xrm.Page.data.entity.getIsDirty();
+
+            if (isdirty) {
+                alert("Форма не сохраненна. Пожалуйста, сохраните форму перед отправкой сообщения.");
+                return;
+            }
+
+            var query = "workflows(" + workflowId + ")/Microsoft.Dynamics.CRM.ExecuteWorkflow";
+
+            var data = { "EntityId": entityId };
+            var req = new XMLHttpRequest();
+            req.open("POST", window.parent.Xrm.Page.context.getClientUrl() + "/api/data/v9.1/" + query, true);
+            req.setRequestHeader("Accept", "application/json");
+            req.setRequestHeader("Content-Type", "application/json; charset=utf-8");
+            req.setRequestHeader("OData-MaxVersion", "4.0");
+            req.setRequestHeader("OData-Version", "4.0");
+            req.onreadystatechange = function () {
+                if (this.readyState == 4 /* complete */) {
+                    req.onreadystatechange = null;
+
+                    if (this.status == 200 || this.status == 204) {
+                        window.parent.Xrm.Page.ui.setFormNotification("Email был отправлен успешно", "INFO", "1");
+                    } else {
+                        var error = JSON.parse(this.response);
+
+                        window.parent.Xrm.Page.ui.setFormNotification("Произошла ошибка отправки сообщения. Подробнее в сеансах процесса.", "ERROR", "3");
+                    }
+                }
+            };
+            req.send(JSON.stringify(data));
+        }
+    </script>
+
+    <button id="button" style="display:none;" onclick="SendEmail()">Отправить Email<div></div></button>
+</body>
+</html>
